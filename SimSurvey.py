@@ -3,16 +3,26 @@
 import sys
 import json
 import math
+import random
 
 config = '''
 {
   "seafloor": {
       "default_depth": -100,
       "features": [
-        {"type": "box", "xcenter": 20, "ycenter": 30, "xsize": 5, "ysize": 8, "zsize":2},
+        {"type": "box", "xcenter": 20, "ycenter": 130, "xsize": 5, "ysize": 8, "zsize":2},
         {"type": "box", "xcenter": 420, "ycenter": 350, "xsize": 25, "ysize": 12, "zsize":4.5},
-        {"type": "hemisphere", "xcenter": 780, "ycenter": 130, "radius": 7},
-        {"type": "cone", "xcenter": 200, "ycenter": 500, "radius": 15, "height": 12}
+        {"type": "hemisphere", "xcenter": 180, "ycenter": 130, "radius": 7},
+        {"type": "cone", "xcenter": 200, "ycenter": 500, "radius": 15, "height": 12},
+        {"type": "hemisphere", "xcenter": 50, "ycenter": 50, "radius": 35},
+        {"type": "hemisphere", "xcenter": 125, "ycenter": 650, "radius": 15},
+        {"type": "hemisphere", "xcenter": 243, "ycenter": 35, "radius": 7},
+        {"type": "hemisphere", "xcenter": 79, "ycenter": 728, "radius": 11},
+        {"type": "cone", "xcenter": 451, "ycenter": 24, "radius": 18, "height": 9},
+        {"type": "cone", "xcenter": 245, "ycenter": 173, "radius": 3, "height": 17},
+        {"type": "box", "xcenter": 32, "ycenter": 831, "xsize": 3, "ysize": 11, "zsize":7.75},
+        {"type": "box", "xcenter": 387, "ycenter": 121, "xsize": 38, "ysize": 21, "zsize":3.2},
+        {"type": "box", "xcenter": 427, "ycenter": 814, "xsize": 4, "ysize": 26, "zsize":21}
       ]
   },
   "surveys": [
@@ -22,19 +32,23 @@ config = '''
       "swath_width": 200,
       "speed": 5,
       "ping_rate": 2,
+      "horizontal_jitter": 0.5,
+      "vertical_jitter": 0.001,
       "lines":[
-        {"xstart": 10, "ystart": 0, "xfinish": 1000, "yfinish": 900},
-        {"xstart": 925, "ystart": 1000, "xfinish": 0, "yfinish": 100}
+        {"xstart": 10, "ystart": 10, "xfinish": 50, "yfinish": 1000},
+        {"xstart": 200, "ystart": 950, "xfinish": 190, "yfinish": 0},
+        {"xstart": 325, "ystart": 10, "xfinish": 330, "yfinish": 1000},
+        {"xstart": 410, "ystart": 950, "xfinish": 415, "yfinish": 0}
       ]
     },
     {
       "output": "full.xyz",
-      "beam_count": 2000,
-      "swath_width": 1000,
+      "beam_count": 1000,
+      "swath_width": 500,
       "speed": 1,
       "ping_rate": 2,
       "lines":[
-        {"xstart": 500, "ystart": 0, "xfinish": 500, "yfinish": 1000}
+        {"xstart": 250, "ystart": 0, "xfinish": 250, "yfinish": 1000}
       ]
     }
 
@@ -51,6 +65,8 @@ class Seafloor:
         self.features.append(Box(fc))
       if fc['type'] == 'cone':
         self.features.append(Cone(fc))
+      if fc['type'] == 'hemisphere':
+        self.features.append(Hemisphere(fc))
     
   def depthAt(self,x,y):
     ret = self.depth
@@ -93,6 +109,19 @@ class Cone(Feature):
       return default+self.height*(1.0-distance/self.radius)
     return default
 
+class Hemisphere(Feature):
+  def __init__(self,config):
+    Feature.__init__(self,config)
+    self.radius = float(config['radius'])
+    
+  def depthAt(self,x,y,default):
+    dx = x-self.xcenter
+    dy = y-self.ycenter
+    distance = math.sqrt(dx*dx+dy*dy)
+    if distance < self.radius:
+      return default+math.sqrt(1-math.pow((distance/self.radius),2.0))*self.radius
+    return default
+
   
 class SurveyLine:
   def __init__(self, config):
@@ -114,14 +143,18 @@ class SurveyLine:
     y = self.start[1]
     ping = 0
     while ping < ping_count:
-      d = survey.seafloor.depthAt(x,y)
-      print ping,x,y,d
+      jx = random.gauss(x,survey.horizontalJitter)
+      jy = random.gauss(y,survey.horizontalJitter)
+      d = survey.seafloor.depthAt(jx,jy)
+      d = random.gauss(d,abs(d)*survey.verticalJitter)
+      print ping,jx,jy,d
       if survey.beam_count > 1:
         beam = 0
         lx = x-ldx*survey.swath_width/2.0
         ly = y-ldy*survey.swath_width/2.0
         while beam < survey.beam_count:
           d = survey.seafloor.depthAt(lx,ly)
+          d = random.gauss(d,abs(d)*survey.verticalJitter)
           survey.outputFile.write(str(lx)+','+str(ly)+','+str(d)+'\n')
           lx += ldx*survey.ping_spacing
           ly += ldy*survey.ping_spacing
@@ -139,6 +172,12 @@ class Survey:
     self.ping_rate = float(config['ping_rate'])
     self.beam_count = config['beam_count']
     self.swath_width = float(config['swath_width'])
+    self.horizontalJitter = 0.0
+    if 'horizontal_jitter' in config:
+      self.horizontalJitter = config['horizontal_jitter']
+    self.verticalJitter = 0.0
+    if 'vertical_jitter' in config:
+      self.verticalJitter = config['vertical_jitter']
     if self.beam_count > 1:
       self.ping_spacing = self.swath_width/float(self.beam_count)
     else:
